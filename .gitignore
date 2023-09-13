@@ -1,0 +1,5 @@
+discovery.py
+ptzcontrol.py
+record.py
+__pycache__/
+dv1/
