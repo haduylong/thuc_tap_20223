@@ -23,8 +23,10 @@ import traceback
 import numpy as np
 import time
 import multiprocessing
+import threading
 
 ROOT = os.path.dirname(__file__)
+record_folder = 'records'
 
 app = FastAPI()
 
@@ -36,10 +38,10 @@ models.Base.metadata.create_all(bind=engine)
 class DeviceBase(BaseModel):
     name : str
     ipaddress : str
-    port : int
+    port : int = 80
     username : str = 'admin'
     password : str = 'songnam@123'
-    subnet : str = '255.255.255.0'
+    subnet : str = '8'
     macaddress : str
 
 class RecordBase(BaseModel):
@@ -71,21 +73,35 @@ onvif_client = None
 uri = ''
 
 def getDeviceInformation(username, password, port, ipaddress):
-    onvif_client = OnvifClient(ip_address=ipaddress, port=port, user_name=username, password=password)
-    onvif_camera = onvif_client._onvif_camera
-    # {Manufacturer, Model, FirmwareVersion, SerialNumber (device id), HardwareId}
-    info1 = onvif_camera.GetDeviceInformation()
-    # mac address
-    mac_info = onvif_camera.GetNetworkInterfaces()[0].Info.HwAddress
-    # submask
-    uri = onvif_camera.devicemgmt.GetCapabilities()['Capabilities']['Device']['XAddr']
-    # 
     info = {}
-    info['manufacturer'] = info1.Manufacturer
-    info['model'] = info1.Model
-    info['mac'] = mac_info
-    info['uri'] = uri
-    return info
+    try: 
+        onvif_client = OnvifClient(ip_address=ipaddress, port=port, user_name=username, password=password)
+        onvif_camera = onvif_client._onvif_camera
+        # {Manufacturer, Model, FirmwareVersion, SerialNumber (device id), HardwareId}
+        info1 = onvif_camera.devicemgmt.GetDeviceInformation()
+        # mac address
+        mac_info = onvif_camera.devicemgmt.GetNetworkInterfaces()[0].Info.HwAddress
+        submask = onvif_camera.devicemgmt.GetNetworkInterfaces()[0].IPv4.Config.Manual[0].PrefixLength
+        #
+        # uri = onvif_camera.devicemgmt.GetCapabilities()['Device']['XAddr']
+        # 
+        info['ipaddress'] = ipaddress
+        info['port'] = port
+        info['username'] = username
+        info['password'] = password
+        info['manufacturer'] = info1.Manufacturer
+        info['model'] = info1.Model
+        info['firmwareVersion'] = info1.FirmwareVersion
+        info['device id'] = info1.SerialNumber
+        info['hardwareId'] = info1.HardwareId
+        info['macaddress'] = mac_info
+        info['submask'] = submask
+        # info['uri'] = uri
+        return info
+    except Exception:
+        traceback.print_exc()
+    finally:
+        return info
 
 '''
 quét tìm thiết bị trong mạng LAN
@@ -107,23 +123,42 @@ crud thiết bị
 # thêm thiết bị vào database
 @app.post("/devices", status_code=status.HTTP_201_CREATED)
 async def create_device(device: DeviceBase, db: db_dependency):
-    db_device = models.Device(**device.dict())
-    db.add(db_device)
-    db.commit()
+    try:
+        # db_device = models.Device(**device.dict())
+        info = getDeviceInformation(username=device.username, password=device.password, ipaddress=device.ipaddress, port=device.port)
+        if len(info) == 0:
+            raise HTTPException(status_code=404, detail="Device not found")
+        else:
+            db_device = Device()
+            db_device.name = device.name
+            db_device.ipaddress = info['ipaddress']
+            db_device.port = info['port']
+            db_device.username = info['username']
+            db_device.password = info['password']
+            db_device.subnet = info['submask']
+            db_device.macaddress = info['macaddress']
+            db.add(db_device)
+            db.commit()
+            return db_device
+    except Exception:
+        traceback.print_exc()
 
 # lấy thiết bị từ database bằng ip
 @app.get("/devices/get/{ipaddress}", status_code=status.HTTP_200_OK)
 async def read_device(ipaddress: str, db: db_dependency):
-    device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
-    if device is None:
-        raise HTTPException(status_code=404, detail="Device not found") 
-    return device
+    try:
+        device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
+        if device is None:
+            raise HTTPException(status_code=404, detail="Device not found") 
+        return device
+    except Exception:
+        traceback.print_exc()
 
 # lấy ra tất cả thiết bị
 @app.get("/devices/get-all-device", status_code=status.HTTP_200_OK)
 async def read_all_device(db: db_dependency):
     try:
-        result = db.query(Device).select_from(Device).join(Record).all()
+        result = db.query(Device).all()
         return result
     except Exception:
         traceback.print_exc()
@@ -301,8 +336,8 @@ async def live(ipaddress: str, db: db_dependency, request: Request):
         raise HTTPException(status_code=404, detail="Device not found")
     liveDevice = device
 
-    # onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
-    onvif_client = OnvifClient('192.168.1.252', 80, 'admin', 'songnam@123')
+    onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
+    # onvif_client = OnvifClient('192.168.1.252', 80, 'admin', 'songnam@123')
     # return await video_viewer(onvif_client, request) 
     profile_tokens = onvif_client.get_profile_tokens()
     profile_token = profile_tokens[0]
@@ -341,7 +376,7 @@ async def live(ipaddress: str, db: db_dependency, request: Request):
 '''
 ghi hình
 '''
-# recording vào máy tính
+# recording vào máy tính multiprocessing
 def recording(ipaddress, device: Device):    
     # kết nối đến camera
     session = SessionLocal()
@@ -412,6 +447,7 @@ async def start_record(ipaddress: str, db: db_dependency):
     except Exception:
         traceback.print_exc()
 
+
 @app.get("/devices/record/stop/{ipaddress}")
 async def stop_record():
     global process
@@ -419,6 +455,90 @@ async def stop_record():
     process.join()
     return 'process join'
 
+# recording vào máy tính multi threading
+threads = {} # dict[{ip : thread}]
+finish = {} # dict[{ip : isFinish}]
+isFinish = False
+
+def recording_thread(ipaddress, device: Device):    
+    # kết nối đến camera
+    session = SessionLocal()
+    onvif_client = OnvifClient(device.ipaddress, device.port, device.username, device.password)
+    # onvif_client = OnvifClient('192.168.1.252', 80, 'admin', 'songnam@123')
+    # return await video_viewer(onvif_client, request) 
+    profile_tokens = onvif_client.get_profile_tokens()
+    profile_token = profile_tokens[0]
+    streamUri = onvif_client.get_streaming_uri(profile_token)
+
+    rtsp_url = streamUri[:7]+device.username+':'+device.password+'@'+streamUri[7:]
+    # folder chứa record của thiết bị
+    devicePath = os.path.join(ROOT, record_folder ,device.name)
+    if not os.path.exists(devicePath):
+        os.makedirs(devicePath)
+
+    # Create a VideoCapture object
+    capture = cv2.VideoCapture(rtsp_url)
+    totalframe = 0
+    # Default resolutions of the frame are obtained (system dependent)
+    frame_width = int(capture.get(3))
+    frame_height = int(capture.get(4))
+    codec = cv2.VideoWriter_fourcc(*'MP4V')
+    while(not finish[ipaddress]):
+        totalframe = 0
+        # tạo tên file luu video
+        start_time_string = time.strftime("%Y-%m-%d %H-%M-%S")
+        output_file = os.path.join(devicePath, start_time_string + '.mp4')
+        # 30 frame per second
+        output_video = cv2.VideoWriter(output_file, codec, fps=30, frameSize=(frame_width, frame_height)) 
+
+        while(True and not finish[ipaddress]):
+            if capture.isOpened() and totalframe <= 180:
+                (status, frame) = capture.read()
+                totalframe +=1    
+                output_video.write(frame) 
+                print(totalframe)
+            else:
+                break
+        
+        record = models.Record()
+        record.timestart = start_time_string
+        record.timeend = time.strftime("%Y-%m-%d %H-%M-%S")
+        record.macaddress = device.macaddress
+        storage = output_file[:-4] + ' ' + record.timeend.split(' ')[1] + '.mp4'
+        record.storage = storage
+        session.add(record)
+        session.commit()   
+        print('luu thanh cong')
+        # capture.release()
+        output_video.release()
+        os.rename(src=output_file, dst=storage)
+
+@app.get("/devices/record-thread/start/{ipaddress}")
+async def start_record_thread(ipaddress: str, db: db_dependency):
+    global threads
+    global finish
+    # lấy thông tin camera từ database
+    device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    try:
+        t = threading.Thread(target=recording_thread, args=((ipaddress, device)))
+        threads[ipaddress] = t
+        finish[ipaddress] = False
+        threads[ipaddress].start()
+    except Exception:
+        traceback.print_exc()
+    
+    return {"message": "Processing started"}
+
+@app.get("/devices/record-thread/stop/{ipaddress}")
+async def stop_record_thread(ipaddress : str):
+    global threads
+    global finish
+    finish[ipaddress] = True
+    threads[ipaddress].join()
+    return 'thread join'
 
 # shut down
 @app.on_event("shutdown")
@@ -427,7 +547,6 @@ async def on_shutdown():
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros)
     pcs.clear()
-
 
 if __name__ == "__main__":
     import uvicorn
