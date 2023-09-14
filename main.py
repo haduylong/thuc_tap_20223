@@ -70,10 +70,27 @@ liveDevice =  None # thiết bị đang live
 onvif_client = None
 uri = ''
 
+def getDeviceInformation(username, password, port, ipaddress):
+    onvif_client = OnvifClient(ip_address=ipaddress, port=port, user_name=username, password=password)
+    onvif_camera = onvif_client._onvif_camera
+    # {Manufacturer, Model, FirmwareVersion, SerialNumber (device id), HardwareId}
+    info1 = onvif_camera.GetDeviceInformation()
+    # mac address
+    mac_info = onvif_camera.GetNetworkInterfaces()[0].Info.HwAddress
+    # submask
+    uri = onvif_camera.devicemgmt.GetCapabilities()['Capabilities']['Device']['XAddr']
+    # 
+    info = {}
+    info['manufacturer'] = info1.Manufacturer
+    info['model'] = info1.Model
+    info['mac'] = mac_info
+    info['uri'] = uri
+    return info
+
 '''
 quét tìm thiết bị trong mạng LAN
 '''
-# tìm toàn bộ thiết bị trong mạng lan
+# tìm toàn bộ ip thiết bị trong mạng lan
 @app.get("/devices/scan", status_code=status.HTTP_200_OK)
 async def scan_device():
     global listScanDevice
@@ -321,6 +338,9 @@ async def live(ipaddress: str, db: db_dependency, request: Request):
         {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
     )
 
+'''
+ghi hình
+'''
 # recording vào máy tính
 def recording(ipaddress, device: Device):    
     # kết nối đến camera
@@ -346,37 +366,40 @@ def recording(ipaddress, device: Device):
     frame_height = int(capture.get(4))
     codec = cv2.VideoWriter_fourcc(*'MP4V')
 
-    # tạo tên file luu video
-    start_time_string = time.strftime("%Y-%m-%d %H-%M-%S")
-    output_file = os.path.join(devicePath, start_time_string + '.mp4')
-    
-    output_video = cv2.VideoWriter(output_file, codec, fps=30, frameSize=(frame_width, frame_height))   
     while(True):
-        if capture.isOpened() and totalframe <= 180:
-            (status, frame) = capture.read()
-            totalframe +=1    
-            output_video.write(frame) 
-            print(totalframe)
-        else:
-            break
-    record = models.Record()
-    record.timestart = start_time_string
-    record.timeend = time.strftime("%Y-%m-%d %H-%M-%S")
-    record.macaddress = device.macaddress
-    record.storage = output_file
-    session.add(record)
-    session.commit()   
-    print('luu thanh cong')
-    capture.release()
-    output_video.release()
+        totalframe = 0
+        # tạo tên file luu video
+        start_time_string = time.strftime("%Y-%m-%d %H-%M-%S")
+        output_file = os.path.join(devicePath, start_time_string + '.mp4')
+        # 30 frame per second
+        output_video = cv2.VideoWriter(output_file, codec, fps=30, frameSize=(frame_width, frame_height))   
+        while(True):
+            if capture.isOpened() and totalframe <= 180:
+                (status, frame) = capture.read()
+                totalframe +=1    
+                output_video.write(frame) 
+                print(totalframe)
+            else:
+                break
+        record = models.Record()
+        record.timestart = start_time_string
+        record.timeend = time.strftime("%Y-%m-%d %H-%M-%S")
+        record.macaddress = device.macaddress
+        storage = output_file[:-4] + ' ' + record.timeend.split(' ')[1] + '.mp4'
+        record.storage = storage
+        session.add(record)
+        session.commit()   
+        print('luu thanh cong')
+        # capture.release()
+        output_video.release()
+        os.rename(src=output_file, dst=storage)
+    
 
-
-'''
-ghi hình
-'''
+process = None
 @app.get("/devices/record/start/{ipaddress}")
-async def record(ipaddress: str, db: db_dependency):
-        # lấy thông tin camera từ database
+async def start_record(ipaddress: str, db: db_dependency):
+    global process
+    # lấy thông tin camera từ database
     device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
     if device is None:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -388,6 +411,13 @@ async def record(ipaddress: str, db: db_dependency):
         return {"message": "Processing started"}
     except Exception:
         traceback.print_exc()
+
+@app.get("/devices/record/stop/{ipaddress}")
+async def stop_record():
+    global process
+    process.terminate()
+    process.join()
+    return 'process join'
 
 
 # shut down
