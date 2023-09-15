@@ -69,8 +69,6 @@ listScanDevice = [] # list[dict{ip, port}] danh sách thiết bị scan được
 listDevice = [] # 
 listRecords = []
 liveDevice =  None # thiết bị đang live
-onvif_client = None
-uri = ''
 
 def getDeviceInformation(username, password, port, ipaddress):
     info = {}
@@ -107,14 +105,40 @@ def getDeviceInformation(username, password, port, ipaddress):
 quét tìm thiết bị trong mạng LAN
 '''
 # tìm toàn bộ ip thiết bị trong mạng lan
+# trên windows
+def get_mac_address_windows(ip_address):
+    arp_command = ['arp', '/a', ip_address]
+    output = subprocess.check_output(arp_command).decode()
+    mac_address = output.split()[-2]
+    return mac_address
+# trên linux
+def get_mac_address_unix(ip_address):
+    arp_command = ['arp', '-n', ip_address]
+    output = subprocess.check_output(arp_command).decode()
+    mac_address = output.split()[3]
+    return mac_address
+
 @app.get("/devices/scan", status_code=status.HTTP_200_OK)
 async def scan_device():
-    global listScanDevice
-    wds_client = WsDiscoveryClient()
-    listScanDevice = wds_client.search()
-    wds_client.dispose()
-    # return template.TemplateResponse('index.html',{'listScanDevice':listScanDevice})\
-    return listScanDevice
+    result = []
+    try:
+        global listScanDevice
+        wds_client = WsDiscoveryClient()
+        listScanDevice = wds_client.search()
+        wds_client.dispose()
+
+        for scanDevice in listScanDevice:
+            mac = get_mac_address_windows(scanDevice.ip_address)
+            result.append({
+                'ipaddress': scanDevice.ip_address,
+                'port': scanDevice.port,
+                'macaddress': mac
+            })
+        return result
+    except Exception:
+        traceback.print_exc()
+    finally:
+        return result
 
 
 '''
@@ -231,7 +255,7 @@ async def read_device_record(macaddress: str,db: db_dependency):
 
 
 '''
-live stream
+live stream #########################################################
 '''
 # index.html
 @app.get("/", status_code=status.HTTP_200_OK)
@@ -247,6 +271,7 @@ async def scripts():
 
 # live
 pcs = set() # peer connection set 
+
 # Tạo lớp VideoStreamTrack để lưu trữ khung hình video
 class CameraVideoTrack(VideoStreamTrack):
     """
@@ -291,7 +316,7 @@ def force_codec(pc, sender, forced_codec):
     transceiver.setCodecPreferences(
         [codec for codec in codecs if codec.mimeType == forced_codec]
     )
-
+'''
 async def video_viewer(onvif_client: OnvifClient, request: Request):
     profile_tokens = onvif_client.get_profile_tokens()
     profile_token = profile_tokens[0]
@@ -326,8 +351,8 @@ async def video_viewer(onvif_client: OnvifClient, request: Request):
     return JSONResponse(
         {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
     )
-
-# stream video ra internet
+'''
+# stream video từ thiết bị ra internet
 @app.post("/devices/live/{ipaddress}", status_code=status.HTTP_200_OK)
 async def live(ipaddress: str, db: db_dependency, request: Request):
     global liveDevice
@@ -374,7 +399,65 @@ async def live(ipaddress: str, db: db_dependency, request: Request):
     )
 
 '''
-ghi hình
+____________________________________________________________________
+'''
+'''
+listLiveDevice = {} # chua cac thiet bi dang live stream
+
+async def streaming(rtsp_url : str, request : Request):
+    params = await request.json()
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        print("Connection state is %s" % pc.connectionState)
+        if pc.connectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+
+    video = CameraVideoTrack(rtsp_url)
+
+    if video:
+        video_sender = pc.addTrack(video)
+        force_codec(pc, video_sender, "video/H264")
+
+    await pc.setRemoteDescription(offer)
+
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    return JSONResponse(
+        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+    )
+
+# stream video từ nhiều thiết bị ra internet
+@app.post("/devices/live-multidevice/{ipaddress}", status_code=status.HTTP_200_OK)
+async def live_multi(ipaddress: str, db: db_dependency, request: Request):
+    global listLiveDevice
+    device = await db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    liveDevice = device
+
+    onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
+    # onvif_client = OnvifClient('192.168.1.252', 80, 'admin', 'songnam@123')
+    # return await video_viewer(onvif_client, request) 
+    profile_tokens = onvif_client.get_profile_tokens()
+    profile_token = profile_tokens[0]
+    streamUri = onvif_client.get_streaming_uri(profile_token)
+
+    rtsp_url = streamUri[:7]+liveDevice.username+':'+liveDevice.password+'@'+streamUri[7:]
+
+    t = threading.Thread(target=streaming, args=(rtsp_url, request))
+    t.start()
+'''
+
+'''
+ghi hình #########################################################
+'''
 '''
 # recording vào máy tính multiprocessing
 def recording(ipaddress, device: Device):    
@@ -454,11 +537,10 @@ async def stop_record():
     process.terminate()
     process.join()
     return 'process join'
-
+'''
 # recording vào máy tính multi threading
 threads = {} # dict[{ip : thread}]
 finish = {} # dict[{ip : isFinish}]
-isFinish = False
 
 def recording_thread(ipaddress, device: Device):    
     # kết nối đến camera
@@ -538,6 +620,8 @@ async def stop_record_thread(ipaddress : str):
     global finish
     finish[ipaddress] = True
     threads[ipaddress].join()
+    del finish[ipaddress]
+    del threads[ipaddress]
     return 'thread join'
 
 # shut down

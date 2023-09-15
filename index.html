@@ -37,19 +37,71 @@
         tr:nth-child(even) {
             background-color: #dddddd;
         }
+
     </style>
 </head>
 
 <body>
     <button id="start" onclick="start()">Start</button>
     <button id="stop" style="display: none" onclick="stop()">Stop</button>
-    <input id="ip-live"/>
-    <input id="username-live"/>
-    <input id="pass-live"/>
-    <div id="media">
-        <h2>Media</h2>
-        <video id="video" autoplay="true" playsinline="true"></video>
+    <div>
+        <span>ip 1</span>
+        <input id="ip-live"/>
+        <button id="start1" onclick="start_one()">Start ip 1</button>
+        <button id="stop1" style="display: none" onclick="stop_one()">Stop ip 1</button>
     </div>
+    <div>
+        <span>ip 2</span>
+        <input id="ip-live-2"/>
+        <button id="start2" onclick="start_two()">Start ip 2</button>
+        <button id="stop2" style="display: none" onclick="stop_two()">Stop ip 2</button>
+    </div>
+    <div>
+        <span>ip 3</span>
+        <input id="ip-live-3"/>
+        <button id="start3" onclick="start_three()">Start ip 3</button>
+        <button id="stop3" style="display: none" onclick="stop_three()">Stop ip 3</button>
+    </div>
+    <div>
+        <span>ip 4</span>
+        <input id="ip-live-4"/>
+        <button id="start4" onclick="start_four()">Start ip 4</button>
+        <button id="stop4" style="display: none" onclick="stop_four()">Stop ip 4</button>
+    </div>
+
+    <div id="table-div">
+        <table id="table-video">
+            <tr>
+                <td>
+                    <div id="media">
+                        <h2>Media</h2>
+                        <video id="video" autoplay="true" playsinline="true"></video>
+                    </div>
+                </td>
+                <td>
+                    <div id="media2">
+                        <h2>Media 2</h2>
+                        <video id="video2" autoplay="true" playsinline="true"></video>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <div id="media3">
+                        <h2>Media 3</h2>
+                        <video id="video3" autoplay="true" playsinline="true"></video>
+                    </div>
+                </td>
+                <td>
+                    <div id="media4">
+                        <h2>Media 4</h2>
+                        <video id="video4" autoplay="true" playsinline="true"></video>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
 
     <h2>LIST DEVICE</h2>
     <button id="btn-scan" onclick="scan()">Scan</button>
