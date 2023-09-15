@@ -68,7 +68,7 @@ variable
 listScanDevice = [] # list[dict{ip, port}] danh sách thiết bị scan được
 listDevice = [] # 
 listRecords = []
-liveDevice =  None # thiết bị đang live
+live_devices = {}
 
 def getDeviceInformation(username, password, port, ipaddress):
     info = {}
@@ -206,8 +206,9 @@ async def delete_device(db: db_dependency):
     delete_all_devices(db)
 
 # ptz điều khiển xoay thiết bị
-@app.get("/devices/ptz/{move_action}", status_code=status.HTTP_200_OK)
-async def move_action(move_action: str):
+@app.get("/devices/ptz/{ipaddress}/{move_action}", status_code=status.HTTP_200_OK)
+async def move_action(ipaddress: str ,move_action: str):
+    liveDevice = live_devices[ipaddress]
     try:
         onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
         # onvif_client = OnvifClient('192.168.1.110', 80, 'admin', 'songnam@123')
@@ -355,11 +356,11 @@ async def video_viewer(onvif_client: OnvifClient, request: Request):
 # stream video từ thiết bị ra internet
 @app.post("/devices/live/{ipaddress}", status_code=status.HTTP_200_OK)
 async def live(ipaddress: str, db: db_dependency, request: Request):
-    global liveDevice
     device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
     if device is None:
         raise HTTPException(status_code=404, detail="Device not found")
     liveDevice = device
+    live_devices[ipaddress] = device
 
     onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
     # onvif_client = OnvifClient('192.168.1.252', 80, 'admin', 'songnam@123')
