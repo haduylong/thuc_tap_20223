@@ -139,15 +139,10 @@ def scanDevice(result : list):
             'macaddress': mac
         })
 
-# result = []
 @app.get("/devices/scan", status_code=status.HTTP_200_OK)
 async def scan_device():
     result = []
-    # global result
     try:
-        # thread = threading.Thread(target=scanDevice, args=(result,))
-        # thread.start()
-        # thread.join()
         scanDevice(result)
         return result
     except Exception:
