@@ -14,6 +14,8 @@ class Device(Base):
 
     subnet = Column(String(255))
     macaddress = Column(String(255), unique=True)
+    datelimit = Column(Integer)
+    timelimit = Column(Integer)
     records = relationship('Record', back_populates='device')
 
 class Record(Base):

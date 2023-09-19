@@ -259,3 +259,82 @@ function stop_four() {
 
     document.getElementById('start4').style.display = 'inline-block';
 }
+
+// start play record
+function negotiates_record(pc) {
+    pc.addTransceiver('video', {direction: 'recvonly'});
+    return pc.createOffer().then(function(offer) {
+        return pc.setLocalDescription(offer);
+    }).then(function() {
+        // wait for ICE gathering to complete
+        return new Promise(function(resolve) {
+            if (pc.iceGatheringState === 'complete') {
+                resolve();
+            } else {
+                function checkState() {
+                    if (pc.iceGatheringState === 'complete') {
+                        pc.removeEventListener('icegatheringstatechange', checkState);
+                        resolve();
+                    }
+                }
+                pc.addEventListener('icegatheringstatechange', checkState);
+            }
+        });
+    }).then(function() {
+        var offer = pc.localDescription;
+        var mac = document.getElementById('macaddress');
+        var start = document.getElementById('timestart')
+        var end = document.getElementById('timeend')
+        var macaddress = mac.value;
+        var timestart = start.value
+        var timesend = end.value
+
+        return fetch(`/records/live/${macaddress}/${timestart}/${timesend}`, {
+            body: JSON.stringify({
+                sdp: offer.sdp,
+                type: offer.type,
+            }),
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            method: 'POST'
+        });
+    }).then(function(response) {
+        return response.json();
+    }).then(function(answer) {
+        return pc.setRemoteDescription(answer);
+    }).catch(function(e) {
+        alert(e);
+    });
+}
+
+var pc5 = null
+function start_record() {
+    var config = {
+        sdpSemantics: 'unified-plan'
+    };
+
+    config.iceServers = [{urls: ['stun:stun.l.google.com:19302']}];
+
+    pc5 = new RTCPeerConnection(config);
+
+    // connect audio / video
+    pc5.addEventListener('track', function(evt) {
+        document.getElementById('record').srcObject = evt.streams[0];
+    });
+
+    document.getElementById('start5').style.display = 'none';
+    negotiates_record(pc5);
+    document.getElementById('stop5').style.display = 'inline-block';
+}
+
+function stop_record() {
+    document.getElementById('stop5').style.display = 'none';
+    
+    // close peer connection
+    setTimeout(function() {
+        pc5.close();
+    }, 500);
+
+    document.getElementById('start5').style.display = 'inline-block';
+}

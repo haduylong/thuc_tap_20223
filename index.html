@@ -75,7 +75,7 @@
                 <td>
                     <div id="media">
                         <h2>Media</h2>
-                        <video id="video" autoplay="true" playsinline="true"></video>
+                        <video id="video" autoplay="true" playsinline="true" controls></video>
                     </div>
                 </td>
                 <td>
@@ -96,6 +96,26 @@
                     <div id="media4">
                         <h2>Media 4</h2>
                         <video id="video4" autoplay="true" playsinline="true"></video>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div>
+        <span>mac address</span> <input id="macaddress" value="24:52:6a:31:d7:ad"/>
+        <span>time start</span> <input id="timestart" value="2023-09-18 17-18-19"/>
+        <span>time end</span> <input id="timeend" value="2023-09-18 17-20-48"/>
+        <button id="start5" onclick="start_record()">play</button>
+        <button id="stop5" style="display: none" onclick="stop_record()">Stop</button>
+    </div>
+    <div>
+        <table>
+            <tr>
+                <td>
+                    <div id="record-div">
+                        <h2>test record</h2>
+                        <video type="video/mp4" id="record" autoplay="true" playsinline="true" controls></video>
                     </div>
                 </td>
             </tr>
