@@ -101,7 +101,15 @@
             </tr>
         </table>
     </div>
-
+    <!-- button connect all and stop all -->
+    <button id="connect-all" onclick="connectAll()">Connect all camera</button>
+    <button id="stop-all" style="display: none" onclick="stopAll()">Stop all camera</button>
+    <!-- table all -->
+    <div>
+        <table id="list-camera">
+        </table>
+    </div>
+    <!-- scan camera -->
     <div>
         <span>mac address</span> <input id="macaddress" value="24:52:6a:31:d7:ad"/>
         <span>time start</span> <input id="timestart" value="2023-09-18 17-18-19"/>
@@ -121,7 +129,6 @@
             </tr>
         </table>
     </div>
-
 
     <h2>LIST DEVICE</h2>
     <button id="btn-scan" onclick="scan()">Scan</button>

@@ -88,7 +88,127 @@ function scan(){
         alert(e);
     });
 }
-// ########################################################################
+
+// ############################################################# test 1 ######################################################################################
+// var pcs = []
+// // hàm chung cho kết nối đến server
+// function negotiateAll(ipaddress, pc) {
+//     pc.addTransceiver('video', {direction: 'recvonly'});
+//     return pc.createOffer().then(function(offer) {
+//         return pc.setLocalDescription(offer);
+//     }).then(function() {
+//         // wait for ICE gathering to complete
+//         return new Promise(function(resolve) {
+//             if (pc.iceGatheringState === 'complete') {
+//                 resolve();
+//             } else {
+//                 function checkState() {
+//                     if (pc.iceGatheringState === 'complete') {
+//                         pc.removeEventListener('icegatheringstatechange', checkState);
+//                         resolve();
+//                     }
+//                 }
+//                 pc.addEventListener('icegatheringstatechange', checkState);
+//             }
+//         });
+//     }).then(function() {
+//         var offer = pc.localDescription;
+
+//         return fetch(`/devices/live/${ipaddress}`, {
+//             body: JSON.stringify({
+//                 sdp: offer.sdp,
+//                 type: offer.type,
+//             }),
+//             headers: {
+//                 'Content-Type': 'application/json'
+//             },
+//             method: 'POST'
+//         });
+//     }).then(function(response) {
+//         return response.json();
+//     }).then(function(answer) {
+//         return pc.setRemoteDescription(answer);
+//     }).catch(function(e) {
+//         alert(e);
+//     });
+// }
+
+// var list_camera = []
+
+// function connectAll(){
+//     // lấy thông tin tấT cả các thiết bị để tạo bảng
+//     fetch('/devices/get-all-device')
+//     .then(function(response) {
+//         return response.json();
+//     })
+//     .then(function(list_cam){
+//         list_camera =  list_cam//JSON.stringify(list_cam, null, 2)
+//         return list_camera
+//     })
+//     .then(function(list_camera){
+//         // Lấy thẻ tbody của bảng
+//         var tableBody = document.getElementById("list-camera");
+        
+//         // Tạo 10 dòng bằng vòng lặp
+//         for (var i = 0; i < list_camera.length; i++) {
+//             // Tạo một dòng mới
+//             var row = document.createElement("tr");
+            
+//             // Tạo các ô dữ liệu trong dòng
+//             var cell = document.createElement("td");
+//             var video = document.createElement("video");
+//             video.id = 'camera' + i.toString();
+//             video.controls = true;
+//             var span = document.createElement('span')
+//             span.textContent = list_camera[i].name
+//             cell.appendChild(span)
+//             cell.appendChild(video);
+//             // them o vao dong
+//             row.appendChild(cell);
+
+//             // Thêm dòng vào tbody
+//             tableBody.appendChild(row);
+//         }
+//     })
+//     .then(function(){
+//         // tạo kết nối đến tất cả các camera
+//         for(var i=0; i<list_camera.length; i++){
+//             var config = {
+//                 sdpSemantics: 'unified-plan'
+//             };
+
+//             config.iceServers = [{urls: ['stun:stun.l.google.com:19302']}];
+
+//             var pc = new RTCPeerConnection(config);
+
+//             // connect audio / video
+//             pc.addEventListener('track', function(evt) {
+//                 if(evt.streams[0]!==null)
+//                     document.getElementById('camera' + i.toString()).srcObject = evt.streams[0];
+//             });
+
+//             document.getElementById('connect-all').style.display = 'none'
+//             negotiateAll(list_camera[i].ipaddress, pc)
+//             document.getElementById('stop-all').style.display = 'inline-block'
+//             list_camera.splice(0, list_camera.length)
+//             pcs.push(pc)
+//         }
+//     })
+
+// }
+
+// function stopAll(){
+//     document.getElementById('stop-all').style.display = 'none'
+//     for(var i=0; i<list_camera.length; i++){
+//         // close peer connection
+//         setTimeout(function() {
+//             pcs[i].close();
+//         }, 500);        
+//     }
+
+//     document.getElementById('connect-all').style.display = 'inline-block'
+// }
+// ######################################################### test 2 ##################################################################################
 // negotiate chung cho cac device
 function negotiates(id, pc) {
     pc.addTransceiver('video', {direction: 'recvonly'});
@@ -112,9 +232,9 @@ function negotiates(id, pc) {
     }).then(function() {
         var offer = pc.localDescription;
         var input = document.getElementById(id);
-        var userId = input.value;
+        var userIp = input.value;
 
-        return fetch(`/devices/live/${userId}`, {
+        return fetch(`/devices/live/${userIp}`, {
             body: JSON.stringify({
                 sdp: offer.sdp,
                 type: offer.type,
@@ -308,6 +428,7 @@ function negotiates_record(pc) {
     });
 }
 
+// ################################ test record stream ####################################
 var pc5 = null
 function start_record() {
     var config = {

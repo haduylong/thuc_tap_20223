@@ -15,11 +15,13 @@ import ffmpeg
 import cv2
 import os.path
 import shutil
+import aiortc
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.rtcrtpsender import RTCRtpSender
 from aiortc.mediastreams import MediaStreamError
 from av.video.frame import VideoFrame
 from aiortc.contrib.media import MediaBlackhole, MediaPlayer, MediaRecorder, MediaRelay
+
 
 import json
 import asyncio
@@ -28,6 +30,7 @@ import numpy as np
 import time
 import multiprocessing
 import threading
+import uuid
 
 ROOT = os.path.dirname(__file__)
 record_folder = 'records'
@@ -64,8 +67,6 @@ def get_db():
         db.close()
 
 db_dependency = Annotated[Session, Depends(get_db)]
-
-conn = engine.connect()
 
 '''
 variable
@@ -170,6 +171,8 @@ async def create_device(device: DeviceBase, db: db_dependency):
             db_device.password = info['password']
             db_device.subnet = info['submask']
             db_device.macaddress = info['macaddress']
+            db_device.datelimit = device.datelimit
+            db_device.timelimit = device.timelimit
             db.add(db_device)
             db.commit()
             return db_device
@@ -178,21 +181,29 @@ async def create_device(device: DeviceBase, db: db_dependency):
 
 # lấy thiết bị từ database bằng ip
 @app.get("/devices/get/{ipaddress}", status_code=status.HTTP_200_OK)
-async def read_device(ipaddress: str, db: db_dependency):
+async def read_device_by_ip(ipaddress: str, db: db_dependency):
     try:
         device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
         if device is None:
             raise HTTPException(status_code=404, detail="Device not found") 
-        return device
+        return device.__dict__
     except Exception:
         traceback.print_exc()
 
 # lấy ra tất cả thiết bị
+def getAllDevice():
+    session = SessionLocal()
+    devices = session.query(Device).all()
+    return devices
+
 @app.get("/devices/get-all-device", status_code=status.HTTP_200_OK)
 async def read_all_device(db: db_dependency):
     try:
-        result = db.query(Device).all()
-        return result
+        results = []
+        devices = db.query(Device).all()
+        for x in devices:
+            results.append(x.__dict__)
+        return results
     except Exception:
         traceback.print_exc()
 
@@ -260,16 +271,22 @@ async def move_actions(ipaddress: str ,move_action: str):
 crud record
 '''
 # lấy ra tất cả các record của thiết bị
+def getRecordByMac(macaddress: str):
+    session = SessionLocal()
+    records = session.query(Record).filter(Record.macaddress == macaddress).all()
+    return records
+
 @app.get("/records/get-record-device/{macaddress}", status_code=status.HTTP_200_OK)
-async def read_device_record(macaddress: str,db: db_dependency):
+async def read_all_device_record(macaddress: str):
     try:
-        result = db.query(Record).filter(Record.macaddress == macaddress).all()
+        # result = db.query(Record).filter(Record.macaddress == macaddress).all()
+        result = []
+        records = getRecordByMac(macaddress)
+        for record in records:
+            result.append(record.__dict__)
         return result
     except Exception:
         traceback.print_exc()
-
-def addNewRecord():
-    pass
 
 '''
 live stream #########################################################
@@ -298,6 +315,8 @@ class CameraVideoTrack(VideoStreamTrack):
         super().__init__()        
         self.device_id = device_id
         self.cap = cv2.VideoCapture(self.device_id)
+        self._id = str(uuid.uuid4())
+        self.__ended = False
         # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         # self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
@@ -318,12 +337,6 @@ class CameraVideoTrack(VideoStreamTrack):
 
         return video_frame
 
-    async def stop(self):
-        """
-        Stop the video track.
-        """
-        self.cap.release()
-        await super().stop()
 
 
 def force_codec(pc, sender, forced_codec):
@@ -333,143 +346,56 @@ def force_codec(pc, sender, forced_codec):
     transceiver.setCodecPreferences(
         [codec for codec in codecs if codec.mimeType == forced_codec]
     )
-'''
-async def video_viewer(onvif_client: OnvifClient, request: Request):
-    profile_tokens = onvif_client.get_profile_tokens()
-    profile_token = profile_tokens[0]
-    streamUri = onvif_client.get_streaming_uri(profile_token)
 
-    uri = streamUri[:7]+liveDevice.username+':'+liveDevice.password+'@'+streamUri[7:]
-
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-
-    pc = RTCPeerConnection()
-    pcs.add(pc)
-
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        print("Connection state is %s" % pc.connectionState)
-        if pc.connectionState == "failed":
-            await pc.close()
-            pcs.discard(pc)
-
-    video = CameraVideoTrack(uri)
-
-    if video:
-        video_sender = pc.addTrack(video)
-        force_codec(pc, video_sender, "video/H264")
-
-    await pc.setRemoteDescription(offer)
-
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    return JSONResponse(
-        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-    )
-'''
-# stream video từ thiết bị ra internet
+# stream video từ một thiết bị ra internet
 @app.post("/devices/live/{ipaddress}", status_code=status.HTTP_200_OK)
 async def live(ipaddress: str, db: db_dependency, request: Request):
-    device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
-    if device is None:
-        raise HTTPException(status_code=404, detail="Device not found")
-    liveDevice = device
-    live_devices[ipaddress] = device
+    try:
+        device = db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
+        if device is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        liveDevice = device
+        live_devices[ipaddress] = device
 
-    onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
-    # onvif_client = OnvifClient('192.168.1.252', 80, 'admin', 'songnam@123')
-    # return await video_viewer(onvif_client, request) 
-    profile_tokens = onvif_client.get_profile_tokens()
-    profile_token = profile_tokens[0]
-    streamUri = onvif_client.get_streaming_uri(profile_token)
+        onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
+        profile_tokens = onvif_client.get_profile_tokens()
+        profile_token = profile_tokens[0]
+        streamUri = onvif_client.get_streaming_uri(profile_token)
 
-    uri = streamUri[:7]+liveDevice.username+':'+liveDevice.password+'@'+streamUri[7:]
+        uri = streamUri[:7]+liveDevice.username+':'+liveDevice.password+'@'+streamUri[7:]
 
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+        params = await request.json()
+        offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
-    pc = RTCPeerConnection()
-    pcs.add(pc)
+        pc = RTCPeerConnection()
+        pcs.add(pc)
+        
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            print("Connection state is %s" % pc.connectionState)
+            if pc.connectionState == "failed":
+                await pc.close()
+                pcs.discard(pc)
 
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        print("Connection state is %s" % pc.connectionState)
-        if pc.connectionState == "failed":
-            await pc.close()
-            pcs.discard(pc)
+        video = CameraVideoTrack(uri)
 
-    video = CameraVideoTrack(uri)
+        if video:
+            video_sender = pc.addTrack(video)
+            force_codec(pc, video_sender, "video/H264")
 
-    if video:
-        video_sender = pc.addTrack(video)
-        force_codec(pc, video_sender, "video/H264")
+        await pc.setRemoteDescription(offer)
 
-    await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
 
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    return JSONResponse(
-        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-    )
+        return JSONResponse(
+            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+        )
+    except Exception:
+        traceback.print_exc()
 
 '''
 ____________________________________________________________________
-'''
-'''
-listLiveDevice = {} # chua cac thiet bi dang live stream
-
-async def streaming(rtsp_url : str, request : Request):
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-
-    pc = RTCPeerConnection()
-    pcs.add(pc)
-
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        print("Connection state is %s" % pc.connectionState)
-        if pc.connectionState == "failed":
-            await pc.close()
-            pcs.discard(pc)
-
-    video = CameraVideoTrack(rtsp_url)
-
-    if video:
-        video_sender = pc.addTrack(video)
-        force_codec(pc, video_sender, "video/H264")
-
-    await pc.setRemoteDescription(offer)
-
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    return JSONResponse(
-        {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-    )
-
-# stream video từ nhiều thiết bị ra internet
-@app.post("/devices/live-multidevice/{ipaddress}", status_code=status.HTTP_200_OK)
-async def live_multi(ipaddress: str, db: db_dependency, request: Request):
-    global listLiveDevice
-    device = await db.query(models.Device).filter(models.Device.ipaddress == ipaddress).first()
-    if device is None:
-        raise HTTPException(status_code=404, detail="Device not found")
-    liveDevice = device
-
-    onvif_client = OnvifClient(liveDevice.ipaddress, liveDevice.port, liveDevice.username, liveDevice.password)
-    # onvif_client = OnvifClient('192.168.1.252', 80, 'admin', 'songnam@123')
-    # return await video_viewer(onvif_client, request) 
-    profile_tokens = onvif_client.get_profile_tokens()
-    profile_token = profile_tokens[0]
-    streamUri = onvif_client.get_streaming_uri(profile_token)
-
-    rtsp_url = streamUri[:7]+liveDevice.username+':'+liveDevice.password+'@'+streamUri[7:]
-
-    t = threading.Thread(target=streaming, args=(rtsp_url, request))
-    t.start()
 '''
 
 '''
